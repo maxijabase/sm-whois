@@ -8,13 +8,13 @@
 
 /* Plugin Info */
 
-public Plugin myinfo =  {
+public Plugin myinfo = {
 	
-	name = "Mix Utilities - Whois", 
-	author = "Sidezz", 
-	description = "Fetches actual name of aliasing players.", 
-	version = "1.1", 
-	url = "www.coldcommunity.com"
+	name = "WhoIs", 
+	author = "ampere", 
+	description = "Provides player identification capabilities", 
+	version = "2.0", 
+	url = "github.com/maxijabase"
 	
 }
 
@@ -46,23 +46,25 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public void CreateTable() {
 	
-	char sQuery[1024] = "";
-	StrCat(sQuery, sizeof(sQuery), "CREATE TABLE IF NOT EXISTS whois_names(");
-	StrCat(sQuery, sizeof(sQuery), "entry INT NOT NULL AUTO_INCREMENT, ");
-	StrCat(sQuery, sizeof(sQuery), "steam_id VARCHAR(64), ");
-	StrCat(sQuery, sizeof(sQuery), "name VARCHAR(128), ");
-	StrCat(sQuery, sizeof(sQuery), "date DATE, ");
-	StrCat(sQuery, sizeof(sQuery), "ip VARCHAR(32), ");
-	StrCat(sQuery, sizeof(sQuery), "PRIMARY KEY(entry)");
-	StrCat(sQuery, sizeof(sQuery), ");");
+	char sQuery[1024] = 
+	"CREATE TABLE IF NOT EXISTS whois_names("...
+	"entry INT NOT NULL AUTO_INCREMENT, "...
+	"steam_id VARCHAR(64), "...
+	"name VARCHAR(128), "...
+	"date DATE, "...
+	"ip VARCHAR(32), "...
+	"PRIMARY KEY(entry)"...
+	");";
+	
 	g_Database.Query(SQL_GenericQuery, sQuery);
 	
-	sQuery = "";
-	StrCat(sQuery, sizeof(sQuery), "CREATE TABLE IF NOT EXISTS whois_permname(");
-	StrCat(sQuery, sizeof(sQuery), "steam_id VARCHAR(64), ");
-	StrCat(sQuery, sizeof(sQuery), "name VARCHAR(128), ");
-	StrCat(sQuery, sizeof(sQuery), "PRIMARY KEY(steam_id)");
-	StrCat(sQuery, sizeof(sQuery), ");");
+	sQuery = 
+	"CREATE TABLE IF NOT EXISTS whois_permname(" ...
+	"steam_id VARCHAR(64), " ...
+	"name VARCHAR(128), " ...
+	"PRIMARY KEY(steam_id)" ...
+	");";
+	
 	g_Database.Query(SQL_GenericQuery, sQuery);
 	
 }
@@ -384,10 +386,10 @@ void InsertPlayerData(int client) {
 	g_Database.Escape(name, safeName, sizeof(safeName));
 	
 	char query[1024];
-	Format(query, sizeof(query), "INSERT INTO whois_names (steam_id, NAME, date, ip) " ...
-								 "SELECT * FROM (SELECT '%s', '%s', NOW(), '%s') AS tmp " ... 
-								 "WHERE NOT EXISTS " ...
-								 "(SELECT * FROM whois_names WHERE NAME = '%s' AND ip = '%s' AND steam_id = '%s') LIMIT 1", steamid, safeName, ip, safeName, ip, steamid);
+	Format(query, sizeof(query), "INSERT INTO whois_names (steam_id, NAME, date, ip) "...
+		"SELECT * FROM (SELECT '%s', '%s', NOW(), '%s') AS tmp "...
+		"WHERE NOT EXISTS "...
+		"(SELECT * FROM whois_names WHERE NAME = '%s' AND ip = '%s' AND steam_id = '%s') LIMIT 1", steamid, safeName, ip, safeName, ip, steamid);
 	
 	g_Database.Query(SQL_GenericQuery, query);
 	
