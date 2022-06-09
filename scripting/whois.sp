@@ -2,6 +2,7 @@
 
 #include <sourcemod>
 #include <morecolors>
+#include "whois/whois.inc"
 
 #pragma semicolon 1
 #pragma newdecls required
@@ -12,7 +13,7 @@ public Plugin myinfo = {
 	
 	name = "WhoIs", 
 	author = "ampere", 
-	description = "Provides player identification capabilities", 
+	description = "Provides player identification and logging capabilities.", 
 	version = "2.0", 
 	url = "github.com/maxijabase"
 	
@@ -20,12 +21,16 @@ public Plugin myinfo = {
 
 Database g_Database = null;
 bool g_Late = false;
+ConVar g_cvHostname;
+char g_cServerIP[32];
+char g_cServerHostname[32];
 
 /* Plugin Start */
 
 public void OnPluginStart() {
 	
 	Database.Connect(SQL_ConnectDatabase, "whois");
+	
 	HookEvent("player_changename", Event_ChangeName);
 	
 	RegConsoleCmd("sm_whois", Command_ShowName, "View set name of a player");
@@ -33,6 +38,12 @@ public void OnPluginStart() {
 	RegAdminCmd("sm_thisis", Command_SetName, ADMFLAG_GENERIC, "Set name of a player");
 	LoadTranslations("common.phrases");
 	LoadTranslations("whois.phrases");
+	
+	g_cvHostname = FindConVar("hostname");
+	g_cvHostname.GetString(g_cServerHostname, sizeof(g_cServerHostname));
+	g_cvHostname.AddChangeHook(OnHostnameChanged);
+	
+	GetServerIP(g_cServerIP, sizeof(g_cServerIP));
 	
 }
 
@@ -47,22 +58,26 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 public void CreateTable() {
 	
 	char sQuery[1024] = 
-	"CREATE TABLE IF NOT EXISTS whois_names("...
+	"CREATE TABLE IF NOT EXISTS whois_logs("...
 	"entry INT NOT NULL AUTO_INCREMENT, "...
 	"steam_id VARCHAR(64), "...
 	"name VARCHAR(128), "...
 	"date DATE, "...
+	"time TIME, "...
 	"ip VARCHAR(32), "...
+	"server_ip VARCHAR(32), "...
+	"server_name VARCHAR(128), "...
+	"action VARCHAR(32), "...
 	"PRIMARY KEY(entry)"...
 	");";
 	
 	g_Database.Query(SQL_GenericQuery, sQuery);
 	
 	sQuery = 
-	"CREATE TABLE IF NOT EXISTS whois_permname(" ...
-	"steam_id VARCHAR(64), " ...
-	"name VARCHAR(128), " ...
-	"PRIMARY KEY(steam_id)" ...
+	"CREATE TABLE IF NOT EXISTS whois_permname("...
+	"steam_id VARCHAR(64), "...
+	"name VARCHAR(128), "...
+	"PRIMARY KEY(steam_id)"...
 	");";
 	
 	g_Database.Query(SQL_GenericQuery, sQuery);
@@ -144,7 +159,7 @@ public Action Command_ShowName(int client, int args) {
 	GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 	
 	char query[256];
-	Format(query, sizeof(query), "SELECT name FROM whois_permname WHERE steam_id='%s';", steamid);
+	Format(query, sizeof(query), "SELECT name FROM whois_permname WHERE steam_id = '%s';", steamid);
 	
 	DataPack pack = new DataPack();
 	pack.WriteCell(client);
@@ -345,18 +360,20 @@ public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int s
 
 public void OnClientPostAdminCheck(int client) {
 	
-	InsertPlayerData(client);
+	InsertPlayerData(client, "connect");
 	
 }
 
 public void Event_ChangeName(Event e, const char[] name, bool noBroadcast) {
 	
+	char newname[64];
 	int client = GetClientOfUserId(e.GetInt("userid"));
-	InsertPlayerData(client);
+	e.GetString("newname", newname, sizeof(newname));
+	InsertPlayerData(client, "namechange", newname);
 	
 }
 
-void InsertPlayerData(int client) {
+void InsertPlayerData(int client, const char[] action, const char[] newname = "") {
 	
 	if (g_Database == null) {
 		
@@ -371,26 +388,38 @@ void InsertPlayerData(int client) {
 		
 	}
 	
-	char steamid[32], name[MAX_NAME_LENGTH], safeName[129], ip[16];
-	
+	// Get Steam ID
+	char steamid[32];
 	if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
 		LogError("[WhoIs] Error while fetching AuthID for %N", client);
 	}
+	
+	// Get name
+	char name[MAX_NAME_LENGTH];
+	char safeName[129];
 	if (!GetClientName(client, name, sizeof(name))) {
 		LogError("[WhoIs] Error while fetching Name for %N", client);
 	}
+	else {
+		if (newname[0] != '\0') {
+			g_Database.Escape(newname, safeName, sizeof(safeName));
+		}
+		else {
+			g_Database.Escape(name, safeName, sizeof(safeName));
+		}
+	}
+	
+	// Get IP
+	char ip[16];
 	if (!GetClientIP(client, ip, sizeof(ip))) {
 		LogError("[WhoIs] Error while fetching IP for %N", client);
 	}
 	
-	g_Database.Escape(name, safeName, sizeof(safeName));
 	
 	char query[1024];
-	Format(query, sizeof(query), "INSERT INTO whois_names (steam_id, NAME, date, ip) "...
-		"SELECT * FROM (SELECT '%s', '%s', NOW(), '%s') AS tmp "...
-		"WHERE NOT EXISTS "...
-		"(SELECT * FROM whois_names WHERE NAME = '%s' AND ip = '%s' AND steam_id = '%s') LIMIT 1", steamid, safeName, ip, safeName, ip, steamid);
-	
+	g_Database.Format(query, sizeof(query), "INSERT INTO whois_logs (steam_id, name, date, time, ip, server_ip, server_name, action) "...
+		"VALUES ('%s', '%s', CURRENT_DATE(), CURTIME(), '%s', '%s', '%s', '%s')", steamid, safeName, ip, g_cServerIP, g_cServerHostname, action);
+
 	g_Database.Query(SQL_GenericQuery, query);
 	
 }
@@ -494,11 +523,15 @@ public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
 		
 		for (int i = 1; i <= MaxClients; i++) {
 			
-			InsertPlayerData(i);
+			InsertPlayerData(i, "connect-late");
 			
 		}
 	}
 	
 	return;
 	
+}
+
+public void OnHostnameChanged(ConVar cvar, const char[] oldValue, const char[] newValue) {
+	strcopy(g_cServerHostname, sizeof(g_cServerHostname), newValue);
 } 
