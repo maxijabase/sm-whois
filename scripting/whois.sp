@@ -64,6 +64,7 @@ public void CreateTable() {
 	"name VARCHAR(128), "...
 	"date DATE, "...
 	"time TIME, "...
+	"timestamp INT, "...
 	"ip VARCHAR(32), "...
 	"server_ip VARCHAR(32), "...
 	"server_name VARCHAR(128), "...
@@ -118,7 +119,7 @@ public Action Command_SetName(int client, int args) {
 	GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 	
 	char query[256];
-	Format(query, sizeof(query), "INSERT INTO whois_permname VALUES('%s', '%s') ON DUPLICATE KEY UPDATE name='%s';", steamid, name, name);
+	Format(query, sizeof(query), "INSERT INTO whois_permname VALUES('%s', '%s') ON DUPLICATE KEY UPDATE name = '%s';", steamid, name, name);
 	
 	g_Database.Query(SQL_GenericQuery, query);
 	
@@ -418,8 +419,8 @@ void InsertPlayerData(int client, const char[] action, const char[] newname = ""
 	
 	char query[1024];
 	g_Database.Format(query, sizeof(query), "INSERT INTO whois_logs (steam_id, name, date, time, ip, server_ip, server_name, action) "...
-		"VALUES ('%s', '%s', CURRENT_DATE(), CURTIME(), '%s', '%s', '%s', '%s')", steamid, safeName, ip, g_cServerIP, g_cServerHostname, action);
-
+		"VALUES ('%s', '%s', CURRENT_DATE(), CURTIME(), UNIX_TIMESTAMP(), '%s', '%s', '%s', '%s')", steamid, safeName, ip, g_cServerIP, g_cServerHostname, action);
+	
 	g_Database.Query(SQL_GenericQuery, query);
 	
 }
