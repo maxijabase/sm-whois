@@ -418,7 +418,7 @@ void InsertPlayerData(int client, const char[] action, const char[] newname = ""
 	
 	
 	char query[1024];
-	g_Database.Format(query, sizeof(query), "INSERT INTO whois_logs (steam_id, name, date, time, ip, server_ip, server_name, action) "...
+	g_Database.Format(query, sizeof(query), "INSERT INTO whois_logs (steam_id, name, date, time, timestamp, ip, server_ip, server_name, action) "...
 		"VALUES ('%s', '%s', CURRENT_DATE(), CURTIME(), UNIX_TIMESTAMP(), '%s', '%s', '%s', '%s')", steamid, safeName, ip, g_cServerIP, g_cServerHostname, action);
 	
 	g_Database.Query(SQL_GenericQuery, query);
