@@ -2,6 +2,7 @@
 
 #include <sourcemod>
 #include <morecolors>
+#include <steamworks>
 #include "whois/whois.inc"
 
 #pragma semicolon 1
@@ -14,7 +15,7 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.0", 
+	version = "2.0.1", 
 	url = "github.com/maxijabase"
 	
 }
@@ -35,7 +36,9 @@ public void OnPluginStart() {
 	
 	RegConsoleCmd("sm_whois", Command_ShowName, "View set name of a player");
 	RegConsoleCmd("sm_whois_full", Command_Activity, "View names of a player");
+	
 	RegAdminCmd("sm_thisis", Command_SetName, ADMFLAG_GENERIC, "Set name of a player");
+	
 	LoadTranslations("common.phrases");
 	LoadTranslations("whois.phrases");
 	
@@ -43,8 +46,7 @@ public void OnPluginStart() {
 	g_cvHostname.GetString(g_cServerHostname, sizeof(g_cServerHostname));
 	g_cvHostname.AddChangeHook(OnHostnameChanged);
 	
-	GetServerIP(g_cServerIP, sizeof(g_cServerIP));
-	
+	GetServerIP(g_cServerIP, sizeof(g_cServerIP), true);
 }
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
@@ -239,7 +241,7 @@ void ShowActivityMenu(int client, int args) {
 			GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 			
 			char query[256];
-			Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_names WHERE steam_id = '%s';", steamid);
+			Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_logs WHERE steam_id = '%s';", steamid);
 			
 			g_Database.Query(SQL_GetPlayerActivity, query, GetClientSerial(client));
 			
@@ -338,7 +340,7 @@ public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int s
 			GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 			
 			char query[256];
-			Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_names WHERE steam_id = '%s' ORDER BY entry DESC;", steamid);
+			Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_logs WHERE steam_id = '%s' ORDER BY entry DESC;", steamid);
 			
 			g_Database.Query(SQL_GetPlayerActivity, query, GetClientSerial(client));
 			
