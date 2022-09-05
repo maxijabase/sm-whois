@@ -15,21 +15,19 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.0.1", 
+	version = "2.0.2", 
 	url = "github.com/maxijabase"
 	
 }
 
 Database g_Database = null;
 bool g_Late = false;
-ConVar g_cvHostname;
 char g_cServerIP[32];
-char g_cServerHostname[32];
+char g_cServerHostname[64];
 
 /* Plugin Start */
 
 public void OnPluginStart() {
-	
 	Database.Connect(SQL_ConnectDatabase, "whois");
 	
 	HookEvent("player_changename", Event_ChangeName);
@@ -42,10 +40,14 @@ public void OnPluginStart() {
 	LoadTranslations("common.phrases");
 	LoadTranslations("whois.phrases");
 	
-	g_cvHostname = FindConVar("hostname");
-	g_cvHostname.GetString(g_cServerHostname, sizeof(g_cServerHostname));
-	g_cvHostname.AddChangeHook(OnHostnameChanged);
+	GetServerName(g_cServerHostname, sizeof(g_cServerHostname));
 	
+	if (SteamWorks_IsConnected()) {
+		GetServerIP(g_cServerIP, sizeof(g_cServerIP), true);
+	}
+}
+
+public void SteamWorks_SteamServersConnected() {
 	GetServerIP(g_cServerIP, sizeof(g_cServerIP), true);
 }
 
@@ -90,19 +92,15 @@ public void CreateTable() {
 /* Commands */
 
 public Action Command_SetName(int client, int args) {
-	
 	if (g_Database == null) {
-		
 		ThrowError("Database not connected");
 		MC_ReplyToCommand(client, "%t", "databaseError");
 		return Plugin_Handled;
 	}
 	
 	if (args != 2) {
-		
 		MC_ReplyToCommand(client, "%t", "thisisUsage");
 		return Plugin_Handled;
-		
 	}
 	
 	char arg[32]; GetCmdArg(1, arg, sizeof(arg));
@@ -111,10 +109,8 @@ public Action Command_SetName(int client, int args) {
 	int target = FindTarget(client, arg, true, false);
 	
 	if (target == -1) {
-		
 		MC_ReplyToCommand(client, "%t", "invalidPlayer", arg);
 		return Plugin_Handled;
-		
 	}
 	
 	char steamid[32];
@@ -127,24 +123,18 @@ public Action Command_SetName(int client, int args) {
 	
 	MC_ReplyToCommand(client, "%t", "nameGiven", arg, arg2);
 	return Plugin_Handled;
-	
 }
 
 public Action Command_ShowName(int client, int args) {
-	
 	if (g_Database == null) {
-		
 		ThrowError("Database not connected");
 		MC_ReplyToCommand(client, "%t", "databaseError");
 		return Plugin_Handled;
-		
 	}
 	
 	if (args != 1) {
-		
 		MC_ReplyToCommand(client, "%t", "whoisUsage");
 		return Plugin_Handled;
-		
 	}
 	
 	char arg[32];
@@ -153,9 +143,7 @@ public Action Command_ShowName(int client, int args) {
 	int target = FindTarget(client, arg, true, false);
 	
 	if (target == -1) {
-		
 		return Plugin_Handled;
-		
 	}
 	
 	char steamid[32];
@@ -171,17 +159,13 @@ public Action Command_ShowName(int client, int args) {
 	g_Database.Query(SQL_SelectPermName, query, pack);
 	
 	return Plugin_Handled;
-	
 }
 
 public Action Command_Activity(int client, int args) {
-	
 	if (g_Database == null) {
-		
 		ThrowError("Database not connected");
 		MC_ReplyToCommand(client, "%t", "databaseError");
 		return Plugin_Handled;
-		
 	}
 	
 	ShowActivityMenu(client, args);
@@ -189,54 +173,36 @@ public Action Command_Activity(int client, int args) {
 }
 
 void ShowActivityMenu(int client, int args) {
-	
 	switch (args) {
-		
 		case 0: {
-			
 			if (!client) {
-				
 				MC_ReplyToCommand(client, "%t", "noConsole");
 				return;
-				
 			}
 			
 			Menu menu = new Menu(Handler_ActivityList);
 			menu.SetTitle("%t", "pickPlayer");
 			
 			char id[8];
-			
 			for (int i = 1; i <= MaxClients; i++) {
-				
 				if (IsClientConnected(i) && IsClientAuthorized(i) && !IsFakeClient(i)) {
-					
 					IntToString(i, id, sizeof(id));
 					char name[MAX_NAME_LENGTH]; GetClientName(i, name, sizeof(name));
-					
 					menu.AddItem(id, name);
-					
 				}
-				
 			}
-			
 			menu.Display(client, 30);
 			return;
-			
 		}
 		
 		case 1: {
-			
 			char arg[32];
 			GetCmdArg(1, arg, sizeof(arg));
 			
 			int target = FindTarget(client, arg, true, false);
-			
 			if (target == -1) {
-				
 				return;
-				
 			}
-			
 			char steamid[32];
 			GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 			
@@ -246,54 +212,37 @@ void ShowActivityMenu(int client, int args) {
 			g_Database.Query(SQL_GetPlayerActivity, query, GetClientSerial(client));
 			
 			return;
-			
 		}
 		
 		default: {
-			
 			if (!client) {
-				
 				MC_ReplyToCommand(client, "%t", "noConsole");
 				return;
-				
 			}
 			
 			Menu menu = new Menu(Handler_ActivityList);
 			menu.SetTitle("%t", "pickPlayer");
 			
 			char id[8];
-			
 			for (int i = 1; i <= MaxClients; i++) {
-				
 				if (IsClientConnected(i) && IsClientAuthorized(i) && !IsFakeClient(i)) {
-					
 					IntToString(i, id, sizeof(id));
 					char name[MAX_NAME_LENGTH]; GetClientName(i, name, sizeof(name));
-					
 					menu.AddItem(id, name);
-					
 				}
-				
 			}
-			
 			menu.Display(client, 30);
 			return;
-			
 		}
-		
 	}
-	
 }
 
 public void SQL_SelectPermName(Database db, DBResultSet results, const char[] error, DataPack pack) {
-	
 	if (db == null || results == null) {
-		
 		LogError("[WhoIs] SQL_SelectPermName Error >> %s", error);
 		PrintToServer("WhoIs >> Failed to query: %s", error);
 		delete results;
 		return;
-		
 	}
 	
 	pack.Reset();
@@ -302,11 +251,9 @@ public void SQL_SelectPermName(Database db, DBResultSet results, const char[] er
 	delete pack;
 	
 	if (!results.FetchRow()) {
-		
 		MC_PrintToChat(client, "%t", "noName", target);
 		ShowActivityMenu(client, target);
 		return;
-		
 	}
 	
 	int nameCol;
@@ -317,23 +264,17 @@ public void SQL_SelectPermName(Database db, DBResultSet results, const char[] er
 	MC_PrintToChat(client, "%t", "thisIsPlayer", target, name);
 	
 	delete results;
-	
 }
 
 public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int selection) {
-	
 	switch (action) {
-		
 		case MenuAction_Select: {
-			
 			char info[64];
 			hMenu.GetItem(selection, info, sizeof(info));
 			int target = StringToInt(info);
 			
 			if (!IsClientConnected(target) || !IsClientAuthorized(target)) {
-				
 				return 0;
-				
 			}
 			
 			char steamid[32];
@@ -345,50 +286,35 @@ public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int s
 			g_Database.Query(SQL_GetPlayerActivity, query, GetClientSerial(client));
 			
 			return 1;
-			
 		}
 		
 		case MenuAction_End: {
-			
 			delete hMenu;
 			return 0;
-			
 		}
-		
 	}
-	
 	return 1;
-	
 }
 
 public void OnClientPostAdminCheck(int client) {
-	
 	InsertPlayerData(client, "connect");
-	
 }
 
 public void Event_ChangeName(Event e, const char[] name, bool noBroadcast) {
-	
 	char newname[64];
 	int client = GetClientOfUserId(e.GetInt("userid"));
 	e.GetString("newname", newname, sizeof(newname));
 	InsertPlayerData(client, "namechange", newname);
-	
 }
 
 void InsertPlayerData(int client, const char[] action, const char[] newname = "") {
-	
 	if (g_Database == null) {
-		
 		LogError("Database not connected");
 		return;
-		
 	}
 	
 	if (!IsClientConnected(client) || !IsClientAuthorized(client) || IsFakeClient(client)) {
-		
 		return;
-		
 	}
 	
 	// Get Steam ID
@@ -418,51 +344,35 @@ void InsertPlayerData(int client, const char[] action, const char[] newname = ""
 		LogError("[WhoIs] Error while fetching IP for %N", client);
 	}
 	
-	
 	char query[1024];
 	g_Database.Format(query, sizeof(query), "INSERT INTO whois_logs (steam_id, name, date, time, timestamp, ip, server_ip, server_name, action) "...
 		"VALUES ('%s', '%s', CURRENT_DATE(), CURTIME(), UNIX_TIMESTAMP(), '%s', '%s', '%s', '%s')", steamid, safeName, ip, g_cServerIP, g_cServerHostname, action);
 	
 	g_Database.Query(SQL_GenericQuery, query);
-	
 }
 
 public int Handler_Nothing(Menu hMenu, MenuAction action, int client, int selection) {
-	
 	switch (action) {
-		
 		case MenuAction_End: {
-			
 			delete hMenu;
 			return 1;
-			
 		}
 		
 		case MenuAction_Cancel: {
-			
 			if (selection == MenuCancel_ExitBack) {
-				
 				ShowActivityMenu(client, 0);
-				
 			}
-			
 		}
-		
 	}
-	
 	return 1;
-	
 }
 
 public void SQL_GetPlayerActivity(Database db, DBResultSet results, const char[] error, any data) {
-	
 	if (db == null || results == null) {
-		
 		LogError("[WhoIs] SQL_GetPlayerActivity Error >> %s", error);
 		PrintToServer("WhoIs >> Failed to query: %s", error);
 		delete results;
 		return;
-		
 	}
 	
 	int client = GetClientFromSerial(data);
@@ -477,62 +387,46 @@ public void SQL_GetPlayerActivity(Database db, DBResultSet results, const char[]
 	menu.SetTitle("%t", "playerNameActivity");
 	
 	while (results.FetchRow()) {
-		
 		count++;
 		char name[64]; results.FetchString(nameCol, name, sizeof(name));
 		char date[32]; results.FetchString(dateCol, date, sizeof(date));
 		char entry[128]; Format(entry, sizeof(entry), "%s - %s", name, date);
 		char id[16]; IntToString(count, id, sizeof(id));
 		menu.AddItem(id, entry, ITEMDRAW_DISABLED);
-		
 	}
 	
 	menu.ExitBackButton = true;
 	menu.Display(client, 30);
 	
 	delete results;
-	
 }
 
 public void SQL_GenericQuery(Database db, DBResultSet results, const char[] error, any data) {
-	
 	if (db == null || results == null) {
-		
 		LogError("[WhoIs] SQL_GenericQuery Error >> %s", error);
 		PrintToServer("WhoIs >> Failed to query: %s", error);
 		delete results;
 		return;
-		
 	}
-	
 	delete results;
-	
 }
 
 public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
-	
 	if (db == null) {
-		
 		LogError("[WhoIs] SQL_ConnectDatabase Error >> %s", error);
 		PrintToServer("WhoIs >> Failed to connect to database: %s", error);
 		return;
-		
 	}
 	
 	g_Database = db;
 	CreateTable();
 	
 	if (g_Late) {
-		
 		for (int i = 1; i <= MaxClients; i++) {
-			
 			InsertPlayerData(i, "connect-late");
-			
 		}
 	}
-	
 	return;
-	
 }
 
 public void OnHostnameChanged(ConVar cvar, const char[] oldValue, const char[] newValue) {
