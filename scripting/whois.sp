@@ -11,13 +11,11 @@
 /* Plugin Info */
 
 public Plugin myinfo = {
-	
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.0.2", 
+	version = "2.0.3", 
 	url = "github.com/maxijabase"
-	
 }
 
 Database g_Database = null;
@@ -26,6 +24,10 @@ char g_cServerIP[32];
 char g_cServerHostname[64];
 
 /* Plugin Start */
+
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
+	g_Late = late;
+}
 
 public void OnPluginStart() {
 	Database.Connect(SQL_ConnectDatabase, "whois");
@@ -40,10 +42,12 @@ public void OnPluginStart() {
 	LoadTranslations("common.phrases");
 	LoadTranslations("whois.phrases");
 	
-	GetServerName(g_cServerHostname, sizeof(g_cServerHostname));
-	
 	if (SteamWorks_IsConnected()) {
 		GetServerIP(g_cServerIP, sizeof(g_cServerIP), true);
+	}
+	
+	if (g_Late) {
+		OnConfigsExecuted();
 	}
 }
 
@@ -51,10 +55,8 @@ public void SteamWorks_SteamServersConnected() {
 	GetServerIP(g_cServerIP, sizeof(g_cServerIP), true);
 }
 
-public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
-	
-	g_Late = late;
-	
+public void OnConfigsExecuted() {
+	GetServerName(g_cServerHostname, sizeof(g_cServerHostname));
 }
 
 /* Database Tables */
