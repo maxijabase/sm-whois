@@ -14,7 +14,7 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.0.3", 
+	version = "2.1", 
 	url = "github.com/maxijabase"
 }
 
@@ -300,6 +300,10 @@ public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int s
 
 public void OnClientPostAdminCheck(int client) {
 	InsertPlayerData(client, "connect");
+}
+
+public void OnClientDisconnect_Post(int client) {
+	InsertPlayerData(client, "disconnect");
 }
 
 public void Event_ChangeName(Event e, const char[] name, bool noBroadcast) {
