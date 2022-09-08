@@ -302,7 +302,7 @@ public void OnClientPostAdminCheck(int client) {
 	InsertPlayerData(client, "connect");
 }
 
-public void OnClientDisconnect_Post(int client) {
+public void OnClientDisconnect(int client) {
 	InsertPlayerData(client, "disconnect");
 }
 
