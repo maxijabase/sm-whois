@@ -14,7 +14,7 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.1.1", 
+	version = "2.1.2", 
 	url = "github.com/maxijabase"
 }
 
@@ -431,15 +431,15 @@ public void SQL_OnSetPermanameCompleted(Database db, DBResultSet results, const 
 	}
 	
 	pack.Reset();
-	int client = GetClientOfUserId(pack.ReadCell());
-	int target = GetClientOfUserId(pack.ReadCell());
+	int issuerUID = pack.ReadCell();
+	int targetUID = pack.ReadCell();
 	char name[32];
 	pack.ReadString(name, sizeof(name));
 	delete pack;
 	
-	Forward_OnPermanameModified(client, target, name);
+	Forward_OnPermanameModified(issuerUID, targetUID, name);
 	
-	MC_PrintToChat(client, "%t", "nameGiven", target, name);
+	MC_PrintToChat(GetClientOfUserId(issuerUID), "%t", "nameGiven", GetClientOfUserId(targetUID), name);
 }
 
 public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
@@ -464,9 +464,9 @@ public void OnHostnameChanged(ConVar cvar, const char[] oldValue, const char[] n
 	strcopy(g_cServerHostname, sizeof(g_cServerHostname), newValue);
 } 
 
-void Forward_OnPermanameModified(int client, int target, const char[] name) {
+void Forward_OnPermanameModified(int userid, int target, const char[] name) {
 	Call_StartForward(g_gfOnPermanameModified);
-	Call_PushCell(client);
+	Call_PushCell(userid);
 	Call_PushCell(target);
 	Call_PushString(name);
 	Call_Finish();

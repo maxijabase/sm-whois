@@ -10,12 +10,12 @@
 /*
 * Called when the permaname of a user is changed
 *
-* @param client			The user that performed the name change
-* @param target 		The targeted user
+* @param issuer			The userid of the issuer
+* @param target 		The targeted user userid
 * @param name 			The new target permaname
 * @noreturn
 */
-forward void Whois_OnPermanameModified(int client, int target, const char[] name);
+forward void Whois_OnPermanameModified(int issuer, int target, const char[] name);
 
 stock void GetServerIP(char[] buffer, int size, bool showport = false) {
 	int ip[4];
