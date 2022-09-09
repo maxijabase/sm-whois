@@ -14,10 +14,11 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.1", 
+	version = "2.1.1", 
 	url = "github.com/maxijabase"
 }
 
+GlobalForward g_gfOnPermanameModified;
 Database g_Database = null;
 bool g_Late = false;
 char g_cServerIP[32];
@@ -26,6 +27,7 @@ char g_cServerHostname[64];
 /* Plugin Start */
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
+	RegPluginLibrary("whois");
 	g_Late = late;
 }
 
@@ -36,6 +38,8 @@ public void OnPluginStart() {
 	
 	RegConsoleCmd("sm_whois", Command_ShowName, "View set name of a player");
 	RegConsoleCmd("sm_whois_full", Command_Activity, "View names of a player");
+	
+	g_gfOnPermanameModified = new GlobalForward("Whois_OnPermanameModified", ET_Ignore, Param_Cell, Param_Cell, Param_String);
 	
 	RegAdminCmd("sm_thisis", Command_SetName, ADMFLAG_GENERIC, "Set name of a player");
 	
@@ -105,13 +109,11 @@ public Action Command_SetName(int client, int args) {
 		return Plugin_Handled;
 	}
 	
-	char arg[32]; GetCmdArg(1, arg, sizeof(arg));
-	char arg2[32]; GetCmdArg(2, arg2, sizeof(arg2));
+	char arg1[32]; GetCmdArg(1, arg1, sizeof(arg1));
 	char name[32]; GetCmdArg(2, name, sizeof(name));
-	int target = FindTarget(client, arg, true, false);
+	int target = FindTarget(client, arg1, true, false);
 	
 	if (target == -1) {
-		MC_ReplyToCommand(client, "%t", "invalidPlayer", arg);
 		return Plugin_Handled;
 	}
 	
@@ -121,9 +123,12 @@ public Action Command_SetName(int client, int args) {
 	char query[256];
 	Format(query, sizeof(query), "INSERT INTO whois_permname VALUES('%s', '%s') ON DUPLICATE KEY UPDATE name = '%s';", steamid, name, name);
 	
-	g_Database.Query(SQL_GenericQuery, query);
+	DataPack pack = new DataPack();
+	pack.WriteCell(GetClientUserId(client));
+	pack.WriteCell(GetClientUserId(target));
+	pack.WriteString(name);
+	g_Database.Query(SQL_OnSetPermanameCompleted, query, pack);
 	
-	MC_ReplyToCommand(client, "%t", "nameGiven", arg, arg2);
 	return Plugin_Handled;
 }
 
@@ -417,6 +422,26 @@ public void SQL_GenericQuery(Database db, DBResultSet results, const char[] erro
 	delete results;
 }
 
+public void SQL_OnSetPermanameCompleted(Database db, DBResultSet results, const char[] error, DataPack pack) {
+	if (db == null || results == null) {
+		LogError("[WhoIs] SQL_GenericQuery Error >> %s", error);
+		PrintToServer("WhoIs >> Failed to query: %s", error);
+		delete results;
+		return;
+	}
+	
+	pack.Reset();
+	int client = GetClientOfUserId(pack.ReadCell());
+	int target = GetClientOfUserId(pack.ReadCell());
+	char name[32];
+	pack.ReadString(name, sizeof(name));
+	delete pack;
+	
+	Forward_OnPermanameModified(client, target, name);
+	
+	MC_PrintToChat(client, "%t", "nameGiven", target, name);
+}
+
 public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
 	if (db == null) {
 		LogError("[WhoIs] SQL_ConnectDatabase Error >> %s", error);
@@ -438,3 +463,11 @@ public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
 public void OnHostnameChanged(ConVar cvar, const char[] oldValue, const char[] newValue) {
 	strcopy(g_cServerHostname, sizeof(g_cServerHostname), newValue);
 } 
+
+void Forward_OnPermanameModified(int client, int target, const char[] name) {
+	Call_StartForward(g_gfOnPermanameModified);
+	Call_PushCell(client);
+	Call_PushCell(target);
+	Call_PushString(name);
+	Call_Finish();
+}

@@ -1,4 +1,22 @@
 
+/*
+**
+*/
+#if defined _whois_included
+#endinput
+#endif
+#define _whois_included
+
+/*
+* Called when the permaname of a user is changed
+*
+* @param client			The user that performed the name change
+* @param target 		The targeted user
+* @param name 			The new target permaname
+* @noreturn
+*/
+forward void Whois_OnPermanameModified(int client, int target, const char[] name);
+
 stock void GetServerIP(char[] buffer, int size, bool showport = false) {
 	int ip[4];
 	SteamWorks_GetPublicIP(ip);
@@ -15,3 +33,14 @@ stock void GetServerName(char[] buffer, int size) {
 	FindConVar("hostname").GetString(hostname, sizeof(hostname));
 	Format(buffer, size, "%s", hostname);
 }
+
+public SharedPlugin __pl_INTERFACE = 
+{
+	name = "whois", 
+	file = "whois.smx", 
+	#if defined REQUIRE_PLUGIN
+	required = 1, 
+	#else
+	required = 0, 
+	#endif
+}; 
