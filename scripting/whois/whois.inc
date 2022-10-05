@@ -1,19 +1,24 @@
-
-/*
-**
-*/
 #if defined _whois_included
 #endinput
 #endif
 #define _whois_included
 
 /*
-* Called when the permaname of a user is changed
-*
-* @param issuer			The userid of the issuer
-* @param target 		The targeted user userid
-* @param name 			The new target permaname
-* @noreturn
+** Get's a client's permaname
+**
+** @param client		The client index
+** @param buffer 		Buffer to store permaname
+** @param maxlen		Buffer's max length
+*/
+native int Whois_GetPermaname(int client, char[] buffer, int maxlen);
+
+/*
+** Called when the permaname of a user is changed
+**
+** @param issuer			The userid of the issuer
+** @param target 		The targeted user userid
+** @param name 			The new target permaname
+** @noreturn
 */
 forward void Whois_OnPermanameModified(int issuer, int target, const char[] name);
 

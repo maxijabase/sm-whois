@@ -14,19 +14,25 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.1.2", 
+	version = "2.2", 
 	url = "github.com/maxijabase"
 }
 
 GlobalForward g_gfOnPermanameModified;
-Database g_Database = null;
+Database g_Database;
 bool g_Late = false;
-char g_cServerIP[32];
-char g_cServerHostname[64];
+char g_ServerIP[32];
+char g_ServerHostname[64];
+char g_Permanames[MAXPLAYERS + 1][128];
 
 /* Plugin Start */
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
+	
+	g_gfOnPermanameModified = new GlobalForward("Whois_OnPermanameModified", ET_Ignore, Param_Cell, Param_Cell, Param_String);
+	
+	CreateNative("Whois_GetPermaname", Native_GetPermaname);
+	
 	RegPluginLibrary("whois");
 	g_Late = late;
 }
@@ -36,18 +42,16 @@ public void OnPluginStart() {
 	
 	HookEvent("player_changename", Event_ChangeName);
 	
-	RegConsoleCmd("sm_whois", Command_ShowName, "View set name of a player");
-	RegConsoleCmd("sm_whois_full", Command_Activity, "View names of a player");
+	RegAdminCmd("sm_whois", CMD_Whois, ADMFLAG_GENERIC, "View permaname of a player");
+	RegAdminCmd("sm_namehistory", CMD_Namehistory, ADMFLAG_GENERIC, "View name history of a player");
 	
-	g_gfOnPermanameModified = new GlobalForward("Whois_OnPermanameModified", ET_Ignore, Param_Cell, Param_Cell, Param_String);
-	
-	RegAdminCmd("sm_thisis", Command_SetName, ADMFLAG_GENERIC, "Set name of a player");
+	RegAdminCmd("sm_thisis", CMD_Thisis, ADMFLAG_GENERIC, "Set name of a player");
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("whois.phrases");
 	
 	if (SteamWorks_IsConnected()) {
-		GetServerIP(g_cServerIP, sizeof(g_cServerIP), true);
+		GetServerIP(g_ServerIP, sizeof(g_ServerIP), true);
 	}
 	
 	if (g_Late) {
@@ -56,11 +60,15 @@ public void OnPluginStart() {
 }
 
 public void SteamWorks_SteamServersConnected() {
-	GetServerIP(g_cServerIP, sizeof(g_cServerIP), true);
+	GetServerIP(g_ServerIP, sizeof(g_ServerIP), true);
 }
 
 public void OnConfigsExecuted() {
-	GetServerName(g_cServerHostname, sizeof(g_cServerHostname));
+	GetServerName(g_ServerHostname, sizeof(g_ServerHostname));
+}
+
+public void OnHostnameChanged(ConVar cvar, const char[] oldValue, const char[] newValue) {
+	strcopy(g_ServerHostname, sizeof(g_ServerHostname), newValue);
 }
 
 /* Database Tables */
@@ -95,20 +103,71 @@ public void CreateTable() {
 	
 }
 
+/* Forwards */
+
+public void OnClientPostAdminCheck(int client) {
+	InsertPlayerData(client, "connect");
+	CachePermaname(client);
+}
+
+public void OnClientDisconnect(int client) {
+	InsertPlayerData(client, "disconnect");
+	g_Permanames[client][0] = '\0';
+}
+
 /* Commands */
 
-public Action Command_SetName(int client, int args) {
+public Action CMD_Whois(int client, int args) {
+	// Check database
 	if (g_Database == null) {
 		ThrowError("Database not connected");
 		MC_ReplyToCommand(client, "%t", "databaseError");
 		return Plugin_Handled;
 	}
 	
+	// Check command usage
+	if (args != 1) {
+		MC_ReplyToCommand(client, "%t", "whoisUsage");
+		return Plugin_Handled;
+	}
+	
+	// Find target
+	char arg[32];
+	GetCmdArg(1, arg, sizeof(arg));
+	
+	int target = FindTarget(client, arg, true, false);
+	
+	if (target == -1) {
+		return Plugin_Handled;
+	}
+	
+	// Check if name is empty
+	if (g_Permanames[target][0] == '\0') {
+		MC_PrintToChat(client, "%t", "noName", target);
+		FakeClientCommand(client, "sm_namehistory %N", target);
+		return Plugin_Handled;
+	}
+	
+	// Inform permaname
+	MC_ReplyToCommand(client, "%t", "thisIsPlayer", target, g_Permanames[target]);
+	return Plugin_Handled;
+}
+
+public Action CMD_Thisis(int client, int args) {
+	// Check database
+	if (g_Database == null) {
+		ThrowError("Database not connected");
+		MC_ReplyToCommand(client, "%t", "databaseError");
+		return Plugin_Handled;
+	}
+	
+	// Check command usage
 	if (args != 2) {
 		MC_ReplyToCommand(client, "%t", "thisisUsage");
 		return Plugin_Handled;
 	}
 	
+	// Get and check target and new permaname
 	char arg1[32]; GetCmdArg(1, arg1, sizeof(arg1));
 	char name[32]; GetCmdArg(2, name, sizeof(name));
 	int target = FindTarget(client, arg1, true, false);
@@ -117,6 +176,7 @@ public Action Command_SetName(int client, int args) {
 		return Plugin_Handled;
 	}
 	
+	// Update permaname in database
 	char steamid[32];
 	GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 	
@@ -132,61 +192,29 @@ public Action Command_SetName(int client, int args) {
 	return Plugin_Handled;
 }
 
-public Action Command_ShowName(int client, int args) {
+public Action CMD_Namehistory(int client, int args) {
 	if (g_Database == null) {
 		ThrowError("Database not connected");
 		MC_ReplyToCommand(client, "%t", "databaseError");
 		return Plugin_Handled;
 	}
 	
-	if (args != 1) {
-		MC_ReplyToCommand(client, "%t", "whoisUsage");
-		return Plugin_Handled;
-	}
-	
-	char arg[32];
-	GetCmdArg(1, arg, sizeof(arg));
-	
-	int target = FindTarget(client, arg, true, false);
-	
-	if (target == -1) {
-		return Plugin_Handled;
-	}
-	
-	char steamid[32];
-	GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
-	
-	char query[256];
-	Format(query, sizeof(query), "SELECT name FROM whois_permname WHERE steam_id = '%s';", steamid);
-	
-	DataPack pack = new DataPack();
-	pack.WriteCell(client);
-	pack.WriteCell(target);
-	
-	g_Database.Query(SQL_SelectPermName, query, pack);
-	
+	ShowNameHistoryMenu(client, args);
 	return Plugin_Handled;
 }
 
-public Action Command_Activity(int client, int args) {
-	if (g_Database == null) {
-		ThrowError("Database not connected");
-		MC_ReplyToCommand(client, "%t", "databaseError");
-		return Plugin_Handled;
+/* Name History Menu */
+
+void ShowNameHistoryMenu(int client, int args) {
+	// Check console
+	if (!client) {
+		MC_ReplyToCommand(client, "%t", "noConsole");
+		return;
 	}
 	
-	ShowActivityMenu(client, args);
-	return Plugin_Handled;
-}
-
-void ShowActivityMenu(int client, int args) {
 	switch (args) {
+		
 		case 0: {
-			if (!client) {
-				MC_ReplyToCommand(client, "%t", "noConsole");
-				return;
-			}
-			
 			Menu menu = new Menu(Handler_ActivityList);
 			menu.SetTitle("%t", "pickPlayer");
 			
@@ -208,8 +236,10 @@ void ShowActivityMenu(int client, int args) {
 			
 			int target = FindTarget(client, arg, true, false);
 			if (target == -1) {
+				
 				return;
 			}
+			
 			char steamid[32];
 			GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 			
@@ -222,55 +252,10 @@ void ShowActivityMenu(int client, int args) {
 		}
 		
 		default: {
-			if (!client) {
-				MC_ReplyToCommand(client, "%t", "noConsole");
-				return;
-			}
-			
-			Menu menu = new Menu(Handler_ActivityList);
-			menu.SetTitle("%t", "pickPlayer");
-			
-			char id[8];
-			for (int i = 1; i <= MaxClients; i++) {
-				if (IsClientConnected(i) && IsClientAuthorized(i) && !IsFakeClient(i)) {
-					IntToString(i, id, sizeof(id));
-					char name[MAX_NAME_LENGTH]; GetClientName(i, name, sizeof(name));
-					menu.AddItem(id, name);
-				}
-			}
-			menu.Display(client, 30);
+			ShowNameHistoryMenu(client, 0);
 			return;
 		}
 	}
-}
-
-public void SQL_SelectPermName(Database db, DBResultSet results, const char[] error, DataPack pack) {
-	if (db == null || results == null) {
-		LogError("[WhoIs] SQL_SelectPermName Error >> %s", error);
-		PrintToServer("WhoIs >> Failed to query: %s", error);
-		delete results;
-		return;
-	}
-	
-	pack.Reset();
-	int client = pack.ReadCell();
-	int target = pack.ReadCell();
-	delete pack;
-	
-	if (!results.FetchRow()) {
-		MC_PrintToChat(client, "%t", "noName", target);
-		ShowActivityMenu(client, target);
-		return;
-	}
-	
-	int nameCol;
-	results.FieldNameToNum("name", nameCol);
-	
-	char name[128];
-	results.FetchString(nameCol, name, sizeof(name));
-	MC_PrintToChat(client, "%t", "thisIsPlayer", target, name);
-	
-	delete results;
 }
 
 public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int selection) {
@@ -303,86 +288,9 @@ public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int s
 	return 1;
 }
 
-public void OnClientPostAdminCheck(int client) {
-	InsertPlayerData(client, "connect");
-}
-
-public void OnClientDisconnect(int client) {
-	InsertPlayerData(client, "disconnect");
-}
-
-public void Event_ChangeName(Event e, const char[] name, bool noBroadcast) {
-	char newname[64];
-	int client = GetClientOfUserId(e.GetInt("userid"));
-	e.GetString("newname", newname, sizeof(newname));
-	InsertPlayerData(client, "namechange", newname);
-}
-
-void InsertPlayerData(int client, const char[] action, const char[] newname = "") {
-	if (g_Database == null) {
-		LogError("Database not connected");
-		return;
-	}
-	
-	if (!IsClientConnected(client) || !IsClientAuthorized(client) || IsFakeClient(client)) {
-		return;
-	}
-	
-	// Get Steam ID
-	char steamid[32];
-	if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
-		LogError("[WhoIs] Error while fetching AuthID for %N", client);
-	}
-	
-	// Get name
-	char name[MAX_NAME_LENGTH];
-	char safeName[129];
-	if (!GetClientName(client, name, sizeof(name))) {
-		LogError("[WhoIs] Error while fetching Name for %N", client);
-	}
-	else {
-		if (newname[0] != '\0') {
-			g_Database.Escape(newname, safeName, sizeof(safeName));
-		}
-		else {
-			g_Database.Escape(name, safeName, sizeof(safeName));
-		}
-	}
-	
-	// Get IP
-	char ip[16];
-	if (!GetClientIP(client, ip, sizeof(ip))) {
-		LogError("[WhoIs] Error while fetching IP for %N", client);
-	}
-	
-	char query[1024];
-	g_Database.Format(query, sizeof(query), "INSERT INTO whois_logs (steam_id, name, date, time, timestamp, ip, server_ip, server_name, action) "...
-		"VALUES ('%s', '%s', CURRENT_DATE(), CURTIME(), UNIX_TIMESTAMP(), '%s', '%s', '%s', '%s')", steamid, safeName, ip, g_cServerIP, g_cServerHostname, action);
-	
-	g_Database.Query(SQL_GenericQuery, query);
-}
-
-public int Handler_Nothing(Menu hMenu, MenuAction action, int client, int selection) {
-	switch (action) {
-		case MenuAction_End: {
-			delete hMenu;
-			return 1;
-		}
-		
-		case MenuAction_Cancel: {
-			if (selection == MenuCancel_ExitBack) {
-				ShowActivityMenu(client, 0);
-			}
-		}
-	}
-	return 1;
-}
-
 public void SQL_GetPlayerActivity(Database db, DBResultSet results, const char[] error, any data) {
 	if (db == null || results == null) {
 		LogError("[WhoIs] SQL_GetPlayerActivity Error >> %s", error);
-		PrintToServer("WhoIs >> Failed to query: %s", error);
-		delete results;
 		return;
 	}
 	
@@ -412,41 +320,110 @@ public void SQL_GetPlayerActivity(Database db, DBResultSet results, const char[]
 	delete results;
 }
 
+public int Handler_Nothing(Menu hMenu, MenuAction action, int client, int selection) {
+	switch (action) {
+		case MenuAction_End: {
+			delete hMenu;
+			return 1;
+		}
+		
+		case MenuAction_Cancel: {
+			if (selection == MenuCancel_ExitBack) {
+				ShowNameHistoryMenu(client, 0);
+			}
+		}
+	}
+	return 1;
+}
+
+/* Events */
+
+public void Event_ChangeName(Event e, const char[] name, bool noBroadcast) {
+	char newname[64];
+	int client = GetClientOfUserId(e.GetInt("userid"));
+	e.GetString("newname", newname, sizeof(newname));
+	InsertPlayerData(client, "namechange", newname);
+}
+
+/* Log */
+
+void InsertPlayerData(int client, const char[] action, const char[] newname = "") {
+	if (!IsClientConnected(client) || !IsClientAuthorized(client) || IsFakeClient(client)) {
+		return;
+	}
+	
+	// Get Steam ID
+	char steamid[32];
+	if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
+		LogError("[WhoIs] Error while fetching AuthID for %N", client);
+	}
+	
+	// Get name
+	char name[MAX_NAME_LENGTH];
+	char safeName[128];
+	GetClientName(client, name, sizeof(name));
+	
+	if (newname[0] != '\0') {
+		g_Database.Escape(newname, safeName, sizeof(safeName));
+	}
+	else {
+		g_Database.Escape(name, safeName, sizeof(safeName));
+	}
+	
+	// Get IP
+	char ip[16];
+	GetClientIP(client, ip, sizeof(ip));
+	
+	char query[1024];
+	g_Database.Format(query, sizeof(query), "INSERT INTO whois_logs (steam_id, name, date, time, timestamp, ip, server_ip, server_name, action) "...
+		"VALUES ('%s', '%s', CURRENT_DATE(), CURTIME(), UNIX_TIMESTAMP(), '%s', '%s', '%s', '%s')", steamid, safeName, ip, g_ServerIP, g_ServerHostname, action);
+	
+	g_Database.Query(SQL_GenericQuery, query);
+}
+
+/* SQL Callbacks */
+
 public void SQL_GenericQuery(Database db, DBResultSet results, const char[] error, any data) {
 	if (db == null || results == null) {
 		LogError("[WhoIs] SQL_GenericQuery Error >> %s", error);
-		PrintToServer("WhoIs >> Failed to query: %s", error);
-		delete results;
 		return;
 	}
 	delete results;
 }
 
 public void SQL_OnSetPermanameCompleted(Database db, DBResultSet results, const char[] error, DataPack pack) {
+	// Check database
 	if (db == null || results == null) {
-		LogError("[WhoIs] SQL_GenericQuery Error >> %s", error);
-		PrintToServer("WhoIs >> Failed to query: %s", error);
-		delete results;
+		LogError(error);
 		return;
 	}
 	
+	// Get datapack info
 	pack.Reset();
+	
 	int issuerUID = pack.ReadCell();
+	int issuerClient = GetClientOfUserId(issuerUID);
+	
 	int targetUID = pack.ReadCell();
+	int targetClient = GetClientOfUserId(targetUID);
+	
 	char name[32];
 	pack.ReadString(name, sizeof(name));
 	delete pack;
 	
+	// Send forward with info
 	Forward_OnPermanameModified(issuerUID, targetUID, name);
 	
-	MC_PrintToChat(GetClientOfUserId(issuerUID), "%t", "nameGiven", GetClientOfUserId(targetUID), name);
+	// Update cache
+	strcopy(g_Permanames[targetClient], sizeof(g_Permanames[]), name);
+	
+	// Inform admin
+	MC_PrintToChat(issuerClient, "%t", "nameGiven", targetClient, name);
 }
 
 public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
 	if (db == null) {
-		LogError("[WhoIs] SQL_ConnectDatabase Error >> %s", error);
-		PrintToServer("WhoIs >> Failed to connect to database: %s", error);
-		return;
+		SetFailState("[WhoIs] SQL_ConnectDatabase Error >> %s", error);
 	}
 	
 	g_Database = db;
@@ -460,9 +437,22 @@ public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
 	return;
 }
 
-public void OnHostnameChanged(ConVar cvar, const char[] oldValue, const char[] newValue) {
-	strcopy(g_cServerHostname, sizeof(g_cServerHostname), newValue);
+public void SQL_OnPermanameReceived(Database db, DBResultSet results, const char[] error, int userid) {
+	if (db == null || results == null) {
+		LogError(error);
+		return;
+	}
+	
+	int client = GetClientOfUserId(userid);
+	
+	if (!results.FetchRow()) {
+		strcopy(g_Permanames[client], sizeof(g_Permanames[]), "");
+	}
+	
+	results.FetchString(0, g_Permanames[client], sizeof(g_Permanames[]));
 } 
+
+/* Forwards */
 
 void Forward_OnPermanameModified(int userid, int target, const char[] name) {
 	Call_StartForward(g_gfOnPermanameModified);
@@ -470,4 +460,27 @@ void Forward_OnPermanameModified(int userid, int target, const char[] name) {
 	Call_PushCell(target);
 	Call_PushString(name);
 	Call_Finish();
+}
+
+/* Natives */
+
+public int Native_GetPermaname(Handle plugin, int numParams) {
+	int client = GetNativeCell(1);
+	if (client < 1 || client > MaxClients || !IsClientInGame(client)) {
+		ThrowNativeError(SP_ERROR_PARAM, "Invalid client or client is not in game");
+		return;
+	}
+	SetNativeString(2, g_Permanames[client], sizeof(g_Permanames[]));
+}
+
+/* Methods */
+
+void CachePermaname(int client) {
+	char steamid[32];
+	GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
+	
+	char query[256];
+	g_Database.Format(query, sizeof(query), "SELECT name FROM whois_permname WHERE steam_id = '%s'", steamid);
+	
+	g_Database.Query(SQL_OnPermanameReceived, query, GetClientUserId(client));
 }
