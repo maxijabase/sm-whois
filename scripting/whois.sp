@@ -14,7 +14,7 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.2", 
+	version = "2.2.1", 
 	url = "github.com/maxijabase"
 }
 
@@ -447,6 +447,7 @@ public void SQL_OnPermanameReceived(Database db, DBResultSet results, const char
 	
 	if (!results.FetchRow()) {
 		strcopy(g_Permanames[client], sizeof(g_Permanames[]), "");
+		return;
 	}
 	
 	results.FetchString(0, g_Permanames[client], sizeof(g_Permanames[]));
