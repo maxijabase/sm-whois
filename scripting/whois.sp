@@ -14,7 +14,7 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.2.1", 
+	version = "2.2.2", 
 	url = "github.com/maxijabase"
 }
 
@@ -35,6 +35,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	
 	RegPluginLibrary("whois");
 	g_Late = late;
+	
+	return APLRes_Success;
 }
 
 public void OnPluginStart() {
@@ -181,7 +183,7 @@ public Action CMD_Thisis(int client, int args) {
 	GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 	
 	char query[256];
-	Format(query, sizeof(query), "INSERT INTO whois_permname VALUES('%s', '%s') ON DUPLICATE KEY UPDATE name = '%s';", steamid, name, name);
+	g_Database.Format(query, sizeof(query), "INSERT INTO whois_permname VALUES('%s', '%s') ON DUPLICATE KEY UPDATE name = '%s';", steamid, name, name);
 	
 	DataPack pack = new DataPack();
 	pack.WriteCell(GetClientUserId(client));
@@ -469,9 +471,10 @@ public int Native_GetPermaname(Handle plugin, int numParams) {
 	int client = GetNativeCell(1);
 	if (client < 1 || client > MaxClients || !IsClientInGame(client)) {
 		ThrowNativeError(SP_ERROR_PARAM, "Invalid client or client is not in game");
-		return;
+		return 0;
 	}
 	SetNativeString(2, g_Permanames[client], sizeof(g_Permanames[]));
+	return 0;
 }
 
 /* Methods */
