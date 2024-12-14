@@ -14,7 +14,7 @@ public Plugin myinfo = {
 	name = "WhoIs", 
 	author = "ampere", 
 	description = "Provides player identification and logging capabilities.", 
-	version = "2.2.2", 
+	version = "2.2.3", 
 	url = "github.com/maxijabase"
 }
 
@@ -146,7 +146,10 @@ public Action CMD_Whois(int client, int args) {
 	// Check if name is empty
 	if (g_Permanames[target][0] == '\0') {
 		MC_PrintToChat(client, "%t", "noName", target);
-		FakeClientCommand(client, "sm_namehistory %N", target);
+		if (CheckCommandAccess(target, "sm_namehistory", 0))
+		{
+			FakeClientCommand(client, "sm_namehistory %N", target);
+		}
 		return Plugin_Handled;
 	}
 	
