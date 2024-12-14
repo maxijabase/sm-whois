@@ -218,7 +218,6 @@ void ShowNameHistoryMenu(int client, int args) {
   }
   
   switch (args) {
-    
     case 0: {
       Menu menu = new Menu(Handler_ActivityList);
       menu.SetTitle("%t", "pickPlayer");
@@ -227,8 +226,24 @@ void ShowNameHistoryMenu(int client, int args) {
       for (int i = 1; i <= MaxClients; i++) {
         if (IsClientConnected(i) && IsClientAuthorized(i) && !IsFakeClient(i)) {
           IntToString(i, id, sizeof(id));
-          char name[MAX_NAME_LENGTH]; GetClientName(i, name, sizeof(name));
-          menu.AddItem(id, name);
+          
+          // Get player name
+          char name[MAX_NAME_LENGTH];
+          GetClientName(i, name, sizeof(name));
+          
+          // Get permaname if exists
+          char permaname[128];
+          Whois_GetPermaname(i, permaname, sizeof(permaname));
+          
+          // Create display name with permaname if it exists
+          char displayName[MAX_NAME_LENGTH + 128];
+          if (permaname[0] != '\0') {
+            Format(displayName, sizeof(displayName), "%s (%s)", name, permaname);
+          } else {
+            strcopy(displayName, sizeof(displayName), name);
+          }
+          
+          menu.AddItem(id, displayName);
         }
       }
       menu.Display(client, 30);
@@ -241,7 +256,6 @@ void ShowNameHistoryMenu(int client, int args) {
       
       int target = FindTarget(client, arg, true, false);
       if (target == -1) {
-        
         return;
       }
       
