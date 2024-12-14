@@ -1,0 +1,20 @@
+"Updater"
+{
+	"Information"
+	{
+		"Version"
+		{
+			"Latest"	"2.2.3"
+		}
+		
+		"Notes"	"Changes in 2.2.3:"
+		"Notes"	"- Added alias in namehistory menu."
+	}
+	
+	"Files"
+	{
+		"Plugin"	"Path_SM/plugins/whois.smx"
+		
+		"Source"	"Path_SM/scripting/whois.sp"
+	}
+}

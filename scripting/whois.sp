@@ -5,8 +5,13 @@
 #include <steamworks>
 #include "whois/whois.inc"
 
+#undef REQUIRE_PLUGIN
+#include <updater>
+
 #pragma semicolon 1
 #pragma newdecls required
+
+#define UPDATE_URL "https://raw.githubusercontent.com/maxijabase/sm-whois/master/updatefile.txt"
 
 /* Plugin Info */
 
@@ -58,6 +63,16 @@ public void OnPluginStart() {
   
   if (g_Late) {
     OnConfigsExecuted();
+  }
+  
+  if (LibraryExists("updater")) {
+    Updater_AddPlugin(UPDATE_URL);
+  }
+}
+
+public void OnLibraryAdded(const char[] name) {
+  if (StrEqual(name, "updater")) {
+    Updater_AddPlugin(UPDATE_URL);
   }
 }
 
