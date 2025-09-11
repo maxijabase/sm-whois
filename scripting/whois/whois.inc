@@ -13,6 +13,14 @@
 native int Whois_GetPermaname(int client, char[] buffer, int maxlen);
 
 /*
+** Checks if a Steam ID is linked as an alt account
+**
+** @param steamid		The Steam ID to check
+** @return			True if Steam ID is in alt links table, false otherwise
+*/
+native bool Whois_IsLinkedAlt(const char[] steamid);
+
+/*
 ** Called when the permaname of a user is changed
 **
 ** @param issuer			The userid of the issuer

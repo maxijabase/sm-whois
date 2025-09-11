@@ -19,7 +19,7 @@ public Plugin myinfo = {
   name = "WhoIs", 
   author = "ampere", 
   description = "Provides player identification and logging capabilities.", 
-  version = "2.2.4", 
+  version = "2.3", 
   url = "github.com/maxijabase"
 }
 
@@ -29,6 +29,7 @@ bool g_Late = false;
 char g_ServerIP[32];
 char g_ServerHostname[64];
 char g_Permanames[MAXPLAYERS + 1][128];
+StringMap g_LinkedAlts;
 
 /* Plugin Start */
 
@@ -36,6 +37,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
   g_gfOnPermanameModified = new GlobalForward("Whois_OnPermanameModified", ET_Ignore, Param_Cell, Param_Cell, Param_String);
 
   CreateNative("Whois_GetPermaname", Native_GetPermaname);
+  CreateNative("Whois_IsLinkedAlt", Native_IsLinkedAlt);
   RegPluginLibrary("whois");
   g_Late = late;
 
@@ -49,9 +51,12 @@ public void OnPluginStart() {
   RegAdminCmd("sm_namehistory", CMD_Namehistory, ADMFLAG_GENERIC, "View name history of a player");
   
   RegAdminCmd("sm_thisis", CMD_Thisis, ADMFLAG_GENERIC, "Set name of a player");
+  RegAdminCmd("sm_link", CMD_Link, ADMFLAG_GENERIC, "Link a Steam ID to an existing permaname");
   
   LoadTranslations("common.phrases");
   LoadTranslations("whois.phrases");
+  
+  g_LinkedAlts = new StringMap();
   
   if (SteamWorks_IsConnected()) {
     GetServerIP(g_ServerIP, sizeof(g_ServerIP), true);
@@ -114,6 +119,17 @@ public void CreateTable() {
   ");";
   
   g_Database.Query(SQL_GenericQuery, sQuery);
+  
+  sQuery = 
+  "CREATE TABLE IF NOT EXISTS whois_alt_links("...
+  "steam_id VARCHAR(64), "...
+  "main_steam_id VARCHAR(64), "...
+  "linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "...
+  "linked_by VARCHAR(64), "...
+  "PRIMARY KEY(steam_id)"...
+  ");";
+  
+  g_Database.Query(SQL_GenericQuery, sQuery);
 }
 
 /* Forwards */
@@ -121,11 +137,17 @@ public void CreateTable() {
 public void OnClientPostAdminCheck(int client) {
   InsertPlayerData(client, "connect");
   CachePermaname(client);
+  CacheLinkedAlt(client);
 }
 
 public void OnClientDisconnect(int client) {
   InsertPlayerData(client, "disconnect");
   g_Permanames[client][0] = '\0';
+  
+  char steamid[32];
+  if (GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
+    g_LinkedAlts.Remove(steamid);
+  }
 }
 
 /* Commands */
@@ -214,6 +236,78 @@ public Action CMD_Namehistory(int client, int args) {
   }
   
   ShowNameHistoryMenu(client, args);
+  return Plugin_Handled;
+}
+
+public Action CMD_Link(int client, int args) {
+  // Check database
+  if (g_Database == null) {
+    MC_ReplyToCommand(client, "%t", "databaseError");
+    return Plugin_Handled;
+  }
+  
+  // Check command usage
+  if (args != 2) {
+    MC_ReplyToCommand(client, "Usage: sm_link <target_player_or_steamid> <existing_permaname_or_steamid>");
+    return Plugin_Handled;
+  }
+  
+  char arg1[64], arg2[64];
+  GetCmdArg(1, arg1, sizeof(arg1));
+  GetCmdArg(2, arg2, sizeof(arg2));
+  
+  char targetSteamId[32], mainSteamId[32];
+  bool foundTarget = false, foundMain = false;
+  
+  // Try to find target player first
+  int targetClient = FindTarget(client, arg1, true, false);
+  if (targetClient != -1) {
+    if (GetClientAuthId(targetClient, AuthId_Steam2, targetSteamId, sizeof(targetSteamId))) {
+      foundTarget = true;
+    }
+  } else {
+    // If not found as player, assume it's a Steam ID
+    strcopy(targetSteamId, sizeof(targetSteamId), arg1);
+    foundTarget = true;
+  }
+  
+  // Try to find main player
+  int mainClient = FindTarget(client, arg2, true, false);
+  if (mainClient != -1) {
+    if (GetClientAuthId(mainClient, AuthId_Steam2, mainSteamId, sizeof(mainSteamId))) {
+      foundMain = true;
+    }
+  } else {
+    // If not found as player, assume it's a Steam ID
+    strcopy(mainSteamId, sizeof(mainSteamId), arg2);
+    foundMain = true;
+  }
+  
+  if (!foundTarget || !foundMain) {
+    MC_ReplyToCommand(client, "Failed to resolve Steam IDs");
+    return Plugin_Handled;
+  }
+  
+  // Get admin Steam ID
+  char adminSteamId[32];
+  if (!GetClientAuthId(client, AuthId_Steam2, adminSteamId, sizeof(adminSteamId))) {
+    MC_ReplyToCommand(client, "Failed to get your Steam ID");
+    return Plugin_Handled;
+  }
+  
+  // Check if target Steam ID already exists in whois_permname or whois_alt_links
+  char query[512];
+  DataPack pack = new DataPack();
+  pack.WriteCell(GetClientUserId(client));
+  pack.WriteString(targetSteamId);
+  pack.WriteString(mainSteamId);
+  pack.WriteString(adminSteamId);
+  
+  g_Database.Format(query, sizeof(query), 
+    "SELECT steam_id FROM whois_permname WHERE steam_id = '%s' UNION SELECT steam_id FROM whois_alt_links WHERE steam_id = '%s'", 
+    targetSteamId, targetSteamId);
+  g_Database.Query(SQL_CheckTargetExists, query, pack);
+  
   return Plugin_Handled;
 }
 
@@ -461,6 +555,8 @@ public void SQL_ConnectDatabase(Database db, const char[] error, any data) {
   if (g_Late) {
     for (int i = 1; i <= MaxClients; i++) {
       InsertPlayerData(i, "connect-late");
+      CachePermaname(i);
+      CacheLinkedAlt(i);
     }
   }
   return;
@@ -480,6 +576,102 @@ public void SQL_OnPermanameReceived(Database db, DBResultSet results, const char
   }
   
   results.FetchString(0, g_Permanames[client], sizeof(g_Permanames[]));
+}
+
+public void SQL_OnLinkedAltReceived(Database db, DBResultSet results, const char[] error, DataPack pack) {
+  if (db == null || results == null) {
+    LogError("[WhoIs] SQL_OnLinkedAltReceived Error >> %s", error);
+    delete pack;
+    return;
+  }
+  
+  pack.Reset();
+  char steamid[32];
+  pack.ReadString(steamid, sizeof(steamid));
+  delete pack;
+  
+  bool isLinked = results.FetchRow();
+  g_LinkedAlts.SetValue(steamid, isLinked);
+}
+
+public void SQL_CheckTargetExists(Database db, DBResultSet results, const char[] error, DataPack pack) {
+  if (db == null || results == null) {
+    LogError("[WhoIs] SQL_CheckTargetExists Error >> %s", error);
+    delete pack;
+    return;
+  }
+  
+  pack.Reset();
+  int clientUID = pack.ReadCell();
+  int client = GetClientOfUserId(clientUID);
+  
+  char targetSteamId[32], mainSteamId[32], adminSteamId[32];
+  pack.ReadString(targetSteamId, sizeof(targetSteamId));
+  pack.ReadString(mainSteamId, sizeof(mainSteamId));
+  pack.ReadString(adminSteamId, sizeof(adminSteamId));
+  
+  if (results.FetchRow()) {
+    MC_PrintToChat(client, "Target Steam ID is already linked or has a permaname");
+    delete pack;
+    return;
+  }
+  
+  // Check if main Steam ID exists in whois_permname
+  char query[256];
+  g_Database.Format(query, sizeof(query), "SELECT steam_id FROM whois_permname WHERE steam_id = '%s'", mainSteamId);
+  g_Database.Query(SQL_CheckMainExists, query, pack);
+}
+
+public void SQL_CheckMainExists(Database db, DBResultSet results, const char[] error, DataPack pack) {
+  if (db == null || results == null) {
+    LogError("[WhoIs] SQL_CheckMainExists Error >> %s", error);
+    delete pack;
+    return;
+  }
+  
+  pack.Reset();
+  int clientUID = pack.ReadCell();
+  int client = GetClientOfUserId(clientUID);
+  
+  char targetSteamId[32], mainSteamId[32], adminSteamId[32];
+  pack.ReadString(targetSteamId, sizeof(targetSteamId));
+  pack.ReadString(mainSteamId, sizeof(mainSteamId));
+  pack.ReadString(adminSteamId, sizeof(adminSteamId));
+  
+  if (!results.FetchRow()) {
+    MC_PrintToChat(client, "Main Steam ID does not have a permaname");
+    delete pack;
+    return;
+  }
+  
+  // Insert the link
+  char query[256];
+  g_Database.Format(query, sizeof(query), 
+    "INSERT INTO whois_alt_links (steam_id, main_steam_id, linked_by) VALUES ('%s', '%s', '%s')", 
+    targetSteamId, mainSteamId, adminSteamId);
+  g_Database.Query(SQL_OnLinkCompleted, query, pack);
+}
+
+public void SQL_OnLinkCompleted(Database db, DBResultSet results, const char[] error, DataPack pack) {
+  pack.Reset();
+  int clientUID = pack.ReadCell();
+  int client = GetClientOfUserId(clientUID);
+  
+  char targetSteamId[32], mainSteamId[32];
+  pack.ReadString(targetSteamId, sizeof(targetSteamId));
+  pack.ReadString(mainSteamId, sizeof(mainSteamId));
+  delete pack;
+  
+  if (db == null || results == null) {
+    LogError("[WhoIs] SQL_OnLinkCompleted Error >> %s", error);
+    MC_PrintToChat(client, "Failed to link Steam IDs");
+    return;
+  }
+  
+  // Update cache
+  g_LinkedAlts.SetValue(targetSteamId, true);
+  
+  MC_PrintToChat(client, "Successfully linked %s to %s", targetSteamId, mainSteamId);
 }
 
 /* Forwards */
@@ -504,6 +696,18 @@ public int Native_GetPermaname(Handle plugin, int numParams) {
   return 0;
 }
 
+public int Native_IsLinkedAlt(Handle plugin, int numParams) {
+  char steamid[32];
+  GetNativeString(1, steamid, sizeof(steamid));
+  
+  bool isLinked;
+  if (g_LinkedAlts.GetValue(steamid, isLinked)) {
+    return isLinked;
+  }
+  
+  return false;
+}
+
 /* Methods */
 
 void CachePermaname(int client) {
@@ -514,6 +718,24 @@ void CachePermaname(int client) {
   g_Database.Format(query, sizeof(query), "SELECT name FROM whois_permname WHERE steam_id = '%s'", steamid);
   
   g_Database.Query(SQL_OnPermanameReceived, query, GetClientUserId(client));
+}
+
+void CacheLinkedAlt(int client) {
+  if (!IsClientConnected(client) || !IsClientAuthorized(client) || IsFakeClient(client)) {
+    return;
+  }
+  
+  char steamid[32];
+  if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
+    return;
+  }
+  
+  char query[256];
+  g_Database.Format(query, sizeof(query), "SELECT steam_id FROM whois_alt_links WHERE steam_id = '%s'", steamid);
+  
+  DataPack pack = new DataPack();
+  pack.WriteString(steamid);
+  g_Database.Query(SQL_OnLinkedAltReceived, query, pack);
 }
 
 bool IsValidClient(int iClient, bool bIgnoreKickQueue = false)
