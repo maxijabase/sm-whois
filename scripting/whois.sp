@@ -19,7 +19,7 @@ public Plugin myinfo = {
   name = "WhoIs", 
   author = "ampere", 
   description = "Provides player identification and logging capabilities.", 
-  version = "2.2.3", 
+  version = "2.2.4", 
   url = "github.com/maxijabase"
 }
 
@@ -33,20 +33,16 @@ char g_Permanames[MAXPLAYERS + 1][128];
 /* Plugin Start */
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
-  
   g_gfOnPermanameModified = new GlobalForward("Whois_OnPermanameModified", ET_Ignore, Param_Cell, Param_Cell, Param_String);
-  
+
   CreateNative("Whois_GetPermaname", Native_GetPermaname);
-  
   RegPluginLibrary("whois");
   g_Late = late;
-  
+
   return APLRes_Success;
 }
 
 public void OnPluginStart() {
-  Database.Connect(SQL_ConnectDatabase, "whois");
-  
   HookEvent("player_changename", Event_ChangeName);
   
   RegAdminCmd("sm_whois", CMD_Whois, ADMFLAG_GENERIC, "View permaname of a player");
@@ -68,6 +64,8 @@ public void OnPluginStart() {
   if (LibraryExists("updater")) {
     Updater_AddPlugin(UPDATE_URL);
   }
+
+  Database.Connect(SQL_ConnectDatabase, "whois");
 }
 
 public void OnLibraryAdded(const char[] name) {
@@ -91,7 +89,6 @@ public void OnHostnameChanged(ConVar cvar, const char[] oldValue, const char[] n
 /* Database Tables */
 
 public void CreateTable() {
-  
   char sQuery[1024] = 
   "CREATE TABLE IF NOT EXISTS whois_logs("...
   "entry INT NOT NULL AUTO_INCREMENT, "...
@@ -117,7 +114,6 @@ public void CreateTable() {
   ");";
   
   g_Database.Query(SQL_GenericQuery, sQuery);
-  
 }
 
 /* Forwards */
@@ -135,13 +131,6 @@ public void OnClientDisconnect(int client) {
 /* Commands */
 
 public Action CMD_Whois(int client, int args) {
-  // Check database
-  if (g_Database == null) {
-    ThrowError("Database not connected");
-    MC_ReplyToCommand(client, "%t", "databaseError");
-    return Plugin_Handled;
-  }
-  
   // Check command usage
   if (args != 1) {
     MC_ReplyToCommand(client, "%t", "whoisUsage");
@@ -163,7 +152,8 @@ public Action CMD_Whois(int client, int args) {
     MC_PrintToChat(client, "%t", "noName", target);
     if (CheckCommandAccess(target, "sm_namehistory", 0))
     {
-      FakeClientCommand(client, "sm_namehistory %N", target);
+      int userid = GetClientUserId(target);
+      FakeClientCommand(client, "sm_namehistory #%d", userid);
     }
     return Plugin_Handled;
   }
@@ -188,18 +178,23 @@ public Action CMD_Thisis(int client, int args) {
   }
   
   // Get and check target and new permaname
-  char arg1[32]; GetCmdArg(1, arg1, sizeof(arg1));
-  char name[32]; GetCmdArg(2, name, sizeof(name));
+  char arg1[32]; char name[32];
+  GetCmdArg(1, arg1, sizeof(arg1));
+  GetCmdArg(2, name, sizeof(name));
   int target = FindTarget(client, arg1, true, false);
   
   if (target == -1) {
     return Plugin_Handled;
   }
   
-  // Update permaname in database
+  // Check steam id
   char steamid[32];
-  GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
+  if (!GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid))) {
+    MC_ReplyToCommand(client, "%t", "noSteamID", target);
+    return Plugin_Handled;
+  }
   
+  // Insert or update permaname in database
   char query[256];
   g_Database.Format(query, sizeof(query), "INSERT INTO whois_permname VALUES('%s', '%s') ON DUPLICATE KEY UPDATE name = '%s';", steamid, name, name);
   
@@ -214,7 +209,6 @@ public Action CMD_Thisis(int client, int args) {
 
 public Action CMD_Namehistory(int client, int args) {
   if (g_Database == null) {
-    ThrowError("Database not connected");
     MC_ReplyToCommand(client, "%t", "databaseError");
     return Plugin_Handled;
   }
@@ -234,7 +228,7 @@ void ShowNameHistoryMenu(int client, int args) {
   
   switch (args) {
     case 0: {
-      Menu menu = new Menu(Handler_ActivityList);
+      Menu menu = new Menu(Menu_NameHistory);
       menu.SetTitle("%t", "pickPlayer");
       
       char id[8];
@@ -275,13 +269,15 @@ void ShowNameHistoryMenu(int client, int args) {
       }
       
       char steamid[32];
-      GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
+      if (!GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid))) {
+        MC_PrintToChat(client, "%t", "noSteamID", target);
+        return;
+      }
       
       char query[256];
       Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_logs WHERE steam_id = '%s';", steamid);
       
-      g_Database.Query(SQL_GetPlayerActivity, query, GetClientSerial(client));
-      
+      g_Database.Query(SQL_NameHistory, query, GetClientUserId(client));
       return;
     }
     
@@ -292,7 +288,7 @@ void ShowNameHistoryMenu(int client, int args) {
   }
 }
 
-public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int selection) {
+public int Menu_NameHistory(Menu hMenu, MenuAction action, int client, int selection) {
   switch (action) {
     case MenuAction_Select: {
       char info[64];
@@ -304,31 +300,30 @@ public int Handler_ActivityList(Menu hMenu, MenuAction action, int client, int s
       }
       
       char steamid[32];
-      GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
+      if (!GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid))) {
+        MC_PrintToChat(client, "%t", "noSteamID", target);
+        return 0;
+      }
       
       char query[256];
-      Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_logs WHERE steam_id = '%s' ORDER BY entry DESC;", steamid);
-      
-      g_Database.Query(SQL_GetPlayerActivity, query, GetClientSerial(client));
-      
-      return 1;
+      g_Database.Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_logs WHERE steam_id = '%s' ORDER BY entry DESC;", steamid);
+      g_Database.Query(SQL_NameHistory, query, GetClientSerial(client));
     }
     
     case MenuAction_End: {
       delete hMenu;
-      return 0;
     }
   }
-  return 1;
+  return 0;
 }
 
-public void SQL_GetPlayerActivity(Database db, DBResultSet results, const char[] error, any data) {
+public void SQL_NameHistory(Database db, DBResultSet results, const char[] error, int userid) {
   if (db == null || results == null) {
-    LogError("[WhoIs] SQL_GetPlayerActivity Error >> %s", error);
+    LogError("[WhoIs] SQL_NameHistory Error >> %s", error);
     return;
   }
   
-  int client = GetClientFromSerial(data);
+  int client = GetClientOfUserId(userid);
   
   int nameCol, dateCol;
   results.FieldNameToNum("name", nameCol);
@@ -336,7 +331,7 @@ public void SQL_GetPlayerActivity(Database db, DBResultSet results, const char[]
   
   int count;
   
-  Menu menu = new Menu(Handler_Nothing);
+  Menu menu = new Menu(Menu_Empty);
   menu.SetTitle("%t", "playerNameActivity");
   
   while (results.FetchRow()) {
@@ -354,7 +349,7 @@ public void SQL_GetPlayerActivity(Database db, DBResultSet results, const char[]
   delete results;
 }
 
-public int Handler_Nothing(Menu hMenu, MenuAction action, int client, int selection) {
+public int Menu_Empty(Menu hMenu, MenuAction action, int client, int selection) {
   switch (action) {
     case MenuAction_End: {
       delete hMenu;
@@ -372,10 +367,10 @@ public int Handler_Nothing(Menu hMenu, MenuAction action, int client, int select
 
 /* Events */
 
-public void Event_ChangeName(Event e, const char[] name, bool noBroadcast) {
+public void Event_ChangeName(Event event, const char[] name, bool dontBroadcast) {
   char newname[64];
-  int client = GetClientOfUserId(e.GetInt("userid"));
-  e.GetString("newname", newname, sizeof(newname));
+  int client = GetClientOfUserId(event.GetInt("userid"));
+  event.GetString("newname", newname, sizeof(newname));
   InsertPlayerData(client, "namechange", newname);
 }
 
@@ -501,7 +496,7 @@ void Forward_OnPermanameModified(int userid, int target, const char[] name) {
 
 public int Native_GetPermaname(Handle plugin, int numParams) {
   int client = GetNativeCell(1);
-  if (client < 1 || client > MaxClients || !IsClientInGame(client)) {
+  if (!IsValidClient(client)) {
     ThrowNativeError(SP_ERROR_PARAM, "Invalid client or client is not in game");
     return 0;
   }
@@ -520,3 +515,26 @@ void CachePermaname(int client) {
   
   g_Database.Query(SQL_OnPermanameReceived, query, GetClientUserId(client));
 }
+
+bool IsValidClient(int iClient, bool bIgnoreKickQueue = false)
+{
+  if 
+    (
+    // "client" is 0 (console) or lower - nope!
+    0 >= iClient
+    // "client" is higher than MaxClients - nope!
+     || MaxClients < iClient
+    // "client" isnt in game aka their entity hasn't been created - nope!
+     || !IsClientInGame(iClient)
+    // "client" is in the kick queue - nope!
+     || (IsClientInKickQueue(iClient) && !bIgnoreKickQueue)
+    // "client" is sourcetv - nope!
+     || IsClientSourceTV(iClient)
+    // "client" is the replay bot - nope!
+     || IsClientReplay(iClient)
+    )
+  {
+    return false;
+  }
+  return true;
+} 

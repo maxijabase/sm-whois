@@ -4,7 +4,7 @@
 	{
 		"es" "{green}[WhoIs]{default} Error en la base de datos."
 		"en" "{green}[WhoIs]{default} Failed to connect to the database."
-		"pt" "{green}[WhoIs]{default} Erro no banco de dados."
+		"pt" "{green}[WhoIs]{default} Erro na base de dados."
 	}
 	"thisisUsage"
 	{
@@ -63,5 +63,12 @@
 		"es" "Historial de Nombres"
 		"en" "Player Name Activity"
 		"pt" "Historial de Nomes"
+	}
+	"noSteamID"
+	{
+		"#format" "{1:N}"
+		"es" "{green}[WhoIs]{default} No fue posible obtener el SteamID de {1}."
+		"en" "{green}[WhoIs]{default} Unable to get SteamID for {1}."
+		"pt" "{green}[WhoIs]{default} Não foi possível obter o SteamID de {1}."
 	}
 }
