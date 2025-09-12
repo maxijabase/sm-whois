@@ -3,7 +3,7 @@
 #include <sourcemod>
 #include <morecolors>
 #include <steamworks>
-#include "whois/whois.inc"
+#include <whois>
 
 #undef REQUIRE_PLUGIN
 #include <updater>
