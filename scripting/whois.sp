@@ -19,7 +19,7 @@ public Plugin myinfo = {
   name = "WhoIs", 
   author = "ampere", 
   description = "Provides player identification and logging capabilities.", 
-  version = "2.3", 
+  version = "2.3.1", 
   url = "github.com/maxijabase"
 }
 
@@ -401,7 +401,7 @@ public int Menu_NameHistory(Menu hMenu, MenuAction action, int client, int selec
       
       char query[256];
       g_Database.Format(query, sizeof(query), "SELECT DISTINCT name, date FROM whois_logs WHERE steam_id = '%s' ORDER BY entry DESC;", steamid);
-      g_Database.Query(SQL_NameHistory, query, GetClientSerial(client));
+      g_Database.Query(SQL_NameHistory, query, GetClientUserId(client));
     }
     
     case MenuAction_End: {
