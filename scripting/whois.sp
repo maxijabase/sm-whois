@@ -590,8 +590,11 @@ public void SQL_OnLinkedAltReceived(Database db, DBResultSet results, const char
   pack.ReadString(steamid, sizeof(steamid));
   delete pack;
   
-  bool isLinked = results.FetchRow();
-  g_LinkedAlts.SetValue(steamid, isLinked);
+  if (results.FetchRow()) {
+    char mainSteamId[32];
+    results.FetchString(0, mainSteamId, sizeof(mainSteamId));
+    g_LinkedAlts.SetString(steamid, mainSteamId);
+  }
 }
 
 public void SQL_CheckTargetExists(Database db, DBResultSet results, const char[] error, DataPack pack) {
@@ -669,7 +672,7 @@ public void SQL_OnLinkCompleted(Database db, DBResultSet results, const char[] e
   }
   
   // Update cache
-  g_LinkedAlts.SetValue(targetSteamId, true);
+  g_LinkedAlts.SetString(targetSteamId, mainSteamId);
   
   MC_PrintToChat(client, "Successfully linked %s to %s", targetSteamId, mainSteamId);
 }
@@ -700,12 +703,23 @@ public int Native_IsLinkedAlt(Handle plugin, int numParams) {
   char steamid[32];
   GetNativeString(1, steamid, sizeof(steamid));
   
-  bool isLinked;
-  if (g_LinkedAlts.GetValue(steamid, isLinked)) {
-    return isLinked;
+  char mainSteamId[32];
+  if (!g_LinkedAlts.GetString(steamid, mainSteamId, sizeof(mainSteamId))) {
+    return false;
   }
   
-  return false;
+  // Fill optional parameters if provided
+  if (numParams >= 3 && GetNativeCell(3) > 0) {
+    SetNativeString(2, mainSteamId, GetNativeCell(3));
+  }
+  
+  if (numParams >= 5 && GetNativeCell(5) > 0) {
+    char permaname[128];
+    GetPermanameByState(mainSteamId, permaname, sizeof(permaname));
+    SetNativeString(4, permaname, GetNativeCell(5));
+  }
+  
+  return true;
 }
 
 /* Methods */
@@ -731,11 +745,46 @@ void CacheLinkedAlt(int client) {
   }
   
   char query[256];
-  g_Database.Format(query, sizeof(query), "SELECT steam_id FROM whois_alt_links WHERE steam_id = '%s'", steamid);
+  g_Database.Format(query, sizeof(query), "SELECT main_steam_id FROM whois_alt_links WHERE steam_id = '%s'", steamid);
   
   DataPack pack = new DataPack();
   pack.WriteString(steamid);
   g_Database.Query(SQL_OnLinkedAltReceived, query, pack);
+}
+
+void GetPermanameByState(const char[] steamid, char[] buffer, int maxlen) {
+  // First check if any connected client has this Steam ID (for cached permaname)
+  for (int i = 1; i <= MaxClients; i++) {
+    if (IsClientConnected(i) && IsClientAuthorized(i) && !IsFakeClient(i)) {
+      char clientSteamId[32];
+      if (GetClientAuthId(i, AuthId_Steam2, clientSteamId, sizeof(clientSteamId))) {
+        if (StrEqual(steamid, clientSteamId)) {
+          strcopy(buffer, maxlen, g_Permanames[i]);
+          return;
+        }
+      }
+    }
+  }
+  
+  // If not found in cache, query database synchronously
+  if (g_Database != null) {
+    char query[256];
+    g_Database.Format(query, sizeof(query), "SELECT name FROM whois_permname WHERE steam_id = '%s'", steamid);
+    DBResultSet results = SQL_Query(g_Database, query);
+    
+    if (results != null) {
+      if (results.FetchRow()) {
+        results.FetchString(0, buffer, maxlen);
+      } else {
+        strcopy(buffer, maxlen, "");
+      }
+      delete results;
+    } else {
+      strcopy(buffer, maxlen, "");
+    }
+  } else {
+    strcopy(buffer, maxlen, "");
+  }
 }
 
 bool IsValidClient(int iClient, bool bIgnoreKickQueue = false)
@@ -760,3 +809,21 @@ bool IsValidClient(int iClient, bool bIgnoreKickQueue = false)
   }
   return true;
 } 
+
+
+stock void GetServerIP(char[] buffer, int size, bool showport = false) {
+  int ip[4];
+  SteamWorks_GetPublicIP(ip);
+  
+  Format(buffer, size, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  
+  if (showport) {
+    Format(buffer, size, "%s:%d", buffer, FindConVar("hostport").IntValue);
+  }
+}
+
+stock void GetServerName(char[] buffer, int size) {
+  char hostname[128];
+  FindConVar("hostname").GetString(hostname, sizeof(hostname));
+  Format(buffer, size, "%s", hostname);
+}
